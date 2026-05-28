@@ -1,0 +1,29 @@
+# 虚拟环境
+.venv/
+
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE 配置
+.vscode/
+.trae/
+
+# 向量库数据（自动生成，体积大）
+chroma_db/
+
+# 运行日志（包含敏感信息）
+logs/
+
+# MD5 缓存（运行时生成）
+md5.text
+
+# 项目详解文档（仅本地参考）
+项目详解文档.md
