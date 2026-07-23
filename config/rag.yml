@@ -1,2 +1,2 @@
-chat_model_name: Qwen/Qwen3-8B
+chat_model_name: Qwen/Qwen2.5-72B-Instruct
 embedding_model_name: BAAI/bge-m3

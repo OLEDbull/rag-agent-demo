@@ -195,4 +195,5 @@ d:\AI\agent\
 | 一直显示"思考中"无输出 | 检查 API Key 是否有效、网络连接是否正常 |
 | 向量库检索无结果 | 运行 `python rag/vector_store.py` 加载文档 |
 | 工具调用报错 | 查看 `logs/agent_*.log` 日志文件 |
+| 出现 `missing ScriptRunContext` 警告 | 使用 `streamlit run app.py` 启动，而非 `python app.py` |
 
