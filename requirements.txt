@@ -10,3 +10,4 @@ pyyaml
 chromadb
 streamlit
 pypdf
+requests

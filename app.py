@@ -20,9 +20,11 @@ if prompt:
     st.chat_message("user").write(prompt)
     st.session_state.message.append({"role": "user", "content": prompt})
 
-    # AI 流式回复
+    # AI 流式回复（传入历史消息，让 Agent 具备多轮记忆；剔除刚追加的当前用户消息避免重复）
     with st.chat_message("assistant"):
-        res_stream = st.session_state.agent.execute_stream(prompt)
+        res_stream = st.session_state.agent.execute_stream(
+            prompt, history=st.session_state.message[:-1]
+        )
         
         response_messages = []
         

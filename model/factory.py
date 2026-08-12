@@ -12,6 +12,8 @@ chat_model: BaseChatModel = ChatOpenAI(
     model=rag_config["chat_model_name"],
     api_key=api_key,
     base_url="https://api.siliconflow.cn/v1",
+    # 工具调用/Agent 场景用低温采样，避免输出乱码、工具标记泄漏、空响应等不稳定问题
+    temperature=0,
     timeout=60,
     max_retries=2,
 )
