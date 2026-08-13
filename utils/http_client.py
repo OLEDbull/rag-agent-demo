@@ -68,3 +68,29 @@ def get_json(url: str, params: dict = None, timeout: int = DEFAULT_TIMEOUT,
     except ValueError as e:  # JSON 解析失败
         logger.error(f"HTTP 响应 JSON 解析失败: {url} err={e}")
         return None
+
+
+def get_text(url: str, params: dict = None, timeout: int = DEFAULT_TIMEOUT,
+             headers: dict = None, encoding: str = None) -> str | None:
+    """
+    发起 GET 请求并返回文本内容，自动处理中文编码。
+    任何网络/解析异常都会被捕获并记录日志，返回 None，由调用方做优雅降级。
+    :param url: 请求地址
+    :param params: query 参数
+    :param timeout: 超时时间（秒）
+    :param headers: 请求头
+    :param encoding: 强制指定编码（如 'utf-8' / 'gbk'），None 则让 requests 自动探测
+    :return: 响应文本；失败返回 None
+    """
+    try:
+        resp = _session.get(url, params=params, timeout=timeout, headers=headers)
+        resp.raise_for_status()
+        if encoding:
+            resp.encoding = encoding
+        elif resp.encoding is None or resp.encoding.lower() == 'iso-8859-1':
+            # requests 默认按 HTTP 头判断编码，中文站点常误判为 ISO-8859-1
+            resp.encoding = resp.apparent_encoding or 'utf-8'
+        return resp.text
+    except requests.exceptions.RequestException as e:
+        logger.error(f"HTTP GET(文本) 请求失败: {url} params={params} err={e}")
+        return None

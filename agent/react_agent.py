@@ -4,6 +4,7 @@ import json
 import re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from langchain.agents import create_agent
+from langgraph.checkpoint.memory import MemorySaver
 from model.factory import chat_model
 from utils.prompt_loader import load_system_prompt
 from utils.logger_handler import logger
@@ -14,12 +15,23 @@ from agent.tools.agent_tools import (rag_summarize, fetch_external_data, fill_co
 class ReactAgent:
     def __init__(self):
         system_prompt = load_system_prompt()
+        # 记忆管理：MemorySaver 自动持久化会话状态（含工具调用记录）
+        # 通过 thread_id 关联同一会话，使 Agent 能记住之前的问答，支持追问
+        self.memory = MemorySaver()
+        self.thread_id = "default_thread"
         self.agent = create_agent(
             model=chat_model,
             tools=[rag_summarize, fetch_external_data, fill_context_for_report, get_user_id,
                    get_current_month, get_user_location, get_weather],
             system_prompt=system_prompt,
+            checkpointer=self.memory,
         )
+
+    def reset_memory(self):
+        """切换到新会话线程，等效于清空对话记忆"""
+        import time
+        self.thread_id = f"thread_{int(time.time())}"
+        logger.info(f"[reset_memory] 已切换到新会话: {self.thread_id}")
 
     def _clean_content(self, content: str) -> str:
         if not content or not isinstance(content, str):
@@ -53,9 +65,9 @@ class ReactAgent:
 
         return content
 
-    def execute_stream(self, query: str, history: list = None):
+    def execute_stream(self, query: str):
         try:
-            yield from self._execute_stream_impl(query, history)
+            yield from self._execute_stream_impl(query)
         except Exception as e:
             import traceback
             error_msg = "处理请求时出错: " + str(e) + "\n" + traceback.format_exc()
@@ -69,56 +81,55 @@ class ReactAgent:
         :param show_tool_indicator: 是否向前端 yield 工具调用提示
         :return: (清洗后的最终回答, get_weather 的真实返回文本)
         """
-        seen_ids = set()
         final_answer = ""
         weather_fact = None  # 捕获 get_weather 的真实返回，用于反编造兜底
 
-        for chunk in self.agent.stream(input_dict, stream_mode="values"):
-            for msg in chunk.get("messages", []):
-                msg_id = id(msg)
-                if msg_id in seen_ids:
+        # 通过 thread_id 让 LangGraph 自动恢复/持久化该会话的完整状态
+        config = {"configurable": {"thread_id": self.thread_id}}
+        # 使用 updates 模式：每个 chunk 只包含本步新增的消息，天然不会重复输出历史消息
+        # （values 模式会返回完整历史列表，多轮对话时旧 tool_calls 会被反复 yield，造成"🔧正在调用工具"累积）
+        for chunk in self.agent.stream(input_dict, config=config, stream_mode="updates"):
+            # chunk 结构：{node_name: {"messages": [本步新增的消息]}}
+            for node_name, state_update in chunk.items():
+                if not state_update:
                     continue
-                seen_ids.add(msg_id)
+                for msg in state_update.get("messages", []):
+                    # 捕获 get_weather 工具的真实返回结果（模型偶发会忽略它自己编数字）
+                    if getattr(msg, 'type', None) == "tool" and getattr(msg, 'name', None) == "get_weather":
+                        weather_fact = msg.content
 
-                # 捕获 get_weather 工具的真实返回结果（模型偶发会忽略它自己编数字）
-                if getattr(msg, 'type', None) == "tool" and getattr(msg, 'name', None) == "get_weather":
-                    weather_fact = msg.content
+                    if not hasattr(msg, 'type') or msg.type != "ai":
+                        continue
 
-                if not hasattr(msg, 'type') or msg.type != "ai":
-                    continue
+                    # 先处理工具调用：工具调用消息的 content 常常为空，不能因 content 为空而被跳过
+                    if getattr(msg, 'tool_calls', None):
+                        if show_tool_indicator:
+                            for tc in msg.tool_calls:
+                                tool_name = tc.get('name', 'unknown')
+                                yield f"\n\n🔧 正在调用工具: {tool_name}...\n\n"
+                        continue
 
-                # 先处理工具调用：工具调用消息的 content 常常为空，不能因 content 为空而被跳过
-                if getattr(msg, 'tool_calls', None):
-                    if show_tool_indicator:
-                        for tc in msg.tool_calls:
-                            tool_name = tc.get('name', 'unknown')
-                            yield f"\n\n🔧 正在调用工具: {tool_name}...\n\n"
-                    continue
+                    if not hasattr(msg, 'content') or not msg.content:
+                        continue
 
-                if not hasattr(msg, 'content') or not msg.content:
-                    continue
+                    content = msg.content
+                    if not isinstance(content, str) or not content.strip():
+                        continue
 
-                content = msg.content
-                if not isinstance(content, str) or not content.strip():
-                    continue
-
-                cleaned = self._clean_content(content)
-                if cleaned:
-                    final_answer = cleaned
+                    cleaned = self._clean_content(content)
+                    if cleaned:
+                        final_answer = cleaned
 
         return final_answer, weather_fact
 
-    def _execute_stream_impl(self, query: str, history: list = None):
-        # 组装多轮对话历史，让 Agent 具备记忆；仅保留最近的若干轮，避免 token 膨胀
-        messages = []
-        for m in (history or [])[-20:]:
-            role = m.get("role")
-            content = m.get("content")
-            if role in ("user", "assistant") and content:
-                messages.append({"role": role, "content": content})
-        messages.append({"role": "user", "content": query})
-
-        input_dict = {"messages": messages}
+    def _execute_stream_impl(self, query: str):
+        # 仅传入当前用户消息，历史状态由 MemorySaver 按 thread_id 自动恢复
+        # （含工具调用记录，比手动拼接 history 更完整，支持精准追问）
+        input_dict = {
+            "messages": [
+                {"role": "user", "content": query}
+            ]
+        }
 
         # 首次执行（展示工具调用过程）
         final_answer, weather_fact = yield from self._stream_agent(input_dict, show_tool_indicator=True)
