@@ -1,10 +1,18 @@
 collection_name: agent
 persist_directory: chroma_db
-k: 3
 data_path: data
 md5_hex_store: md5.text
 dataallowed_types: ["txt", "pdf"]
 
+# 文档切分
 chunk_size: 200
 chunk_overlap: 20
 separators: ["\n\n", "\n", ".", "!", ",", "?", "。", "！", "？", "", ""]
+
+# 混合检索参数
+# 召回阶段：向量 + BM25 各取较多候选，再由 RRF 融合、Rerank 精排
+vector_top_k: 20        # 向量召回数量（扩大召回，由 rerank 精筛）
+bm25_top_k: 20          # BM25 关键词召回数量
+rrf_k: 60               # RRF 融合常数（标准值 60，平衡高低排名权重）
+rerank_top_n: 5         # Rerank 后最终保留的文档数（喂给 LLM 的上下文数）
+rerank_model: BAAI/bge-reranker-v2-m3   # SiliconFlow rerank 模型

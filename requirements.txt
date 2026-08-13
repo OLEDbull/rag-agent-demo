@@ -11,3 +11,4 @@ chromadb
 streamlit
 pypdf
 requests
+rank_bm25

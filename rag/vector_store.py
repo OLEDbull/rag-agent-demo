@@ -27,7 +27,7 @@ class VectorStoreService:
         )
 
     def get_retriever(self):
-        return self.vector_store.as_retriever(search_kwargs={"k": chroma_config["k"]})
+        return self.vector_store.as_retriever(search_kwargs={"k": chroma_config["vector_top_k"]})
 
     def load_document(self):
         """
